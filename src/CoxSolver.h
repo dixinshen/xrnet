@@ -18,12 +18,11 @@ class CoxSolver : public CoordSolver<T> {
 
 private:
     VecXd eta;
-    VecXd delta;
     vector<double> D;
     vector<double> d;
     VecXi ri;
     VecXi ck;
-    const int m;
+    int m;
     using CoordSolver<T>::n;
     using CoordSolver<T>::nv_total;
     using CoordSolver<T>::intercept;
@@ -78,7 +77,7 @@ public:
                              xvptr,
                              xsptr,
                              wgts_user_,
-                             intercept_,   //// want to set it false as default
+                             intercept_,
                              penalty_type_,
                              cmult_,
                              quantiles_,
@@ -88,10 +87,7 @@ public:
                              nx_,
                              tolerance_,
                              max_iterations_),
-                             eta(n),
-                             delta(n),
-                             ri(m+1),   //// this could be problem, m is unknown now
-                             ck(n+1)
+                             eta(n)
                              {
                                  init();
                              };
@@ -133,10 +129,7 @@ public:
                              nx_,
                              tolerance_,
                              max_iterations_),
-                             eta(n),
-                             delta(n),
-                             ri(m+1),
-                             ck(n+1)
+                             eta(n)
                              {
                                  init();
                              };
@@ -146,63 +139,63 @@ public:
 
     // initialize function
     void init() {
-        delta = y.col(1);
-        eta = Eigen::VectorXd::Zero(n);
+
         // get unique event time, D, and ties at event time, d
-        int idx = 1;
-        D.push_back(-1);
-        for (int k = 0; k < n; k++) {
-            if (delta[k]==1 && y(k,0)!=D[idx-1]) {
-                D.push_back(y(k,0));
-                d.push_back(1);
-                idx += 1;
-            } else if (delta[k]==1 && y(k,0)==D[idx-1]) {
-                d[idx-2] += 1;
+        int events = y(0, 1);
+        for (int k = 1; k < n; ++k) {
+            if (y(k, 0) != y(k - 1, 0)) {
+                if (events) {
+                    D.push_back(y(k - 1, 0));
+                    d.push_back(events);
+                }
+                events = 0;
             }
+            events += y(k, 1);
         }
-        D.erase(D.begin());
+        if (events) {
+            D.push_back(y(n - 1, 0));
+            d.push_back(events);
+        }
         m = D.size();
+
         // get ck, and ri, risk sets
         int ck_prime = 0;
-        ri[0] = n;
-        for (int k = 1; k <= n; k++) {
-            ck[k] = ck_prime;
-            for (int j = ck_prime; j < m; j++) {
-                if (D[j] <= y((k-1),0)) {
-                    ck[k] += 1;
-                    ri[ck[k]] = n - k + 1;
-                } else {
-                    break;
-                }
-                ck_prime = ck[k];
+        ri.setZero(m + 1);
+        ck.setZero(n + 1);
+        for (int k = 0; k < n; ++k) {
+            ck[k + 1] = ck_prime;
+            for (int j = ck_prime; j < m; ++j) {
+                if (D[j] > y(k, 0)) break;
+                ck[k + 1] += 1;
+                ri[ck[k + 1] - 1] = n - k;
+                ck_prime = ck[k + 1];
             }
         }
 
         // initial wgts and residuals
+        eta.setZero(n);
         VecXd exp_eta = VectorXd::Ones(n);
         double sum_exp_eta_prime = 0;
         VectorXd sum_exp_eta(m);
-        for (int i = m-1; i >= 0 && i < m; i--) {
-            sum_exp_eta[i] = sum_exp_eta_prime + exp_eta.segment((n-ri[i]), (ri[i]-ri[i+1])).sum();
+        for (int i = m - 1; i >= 0; --i) {
+            sum_exp_eta[i] = sum_exp_eta_prime + exp_eta.segment(n - ri[i], ri[i] - ri[i + 1]).sum();
             sum_exp_eta_prime = sum_exp_eta[i];
         }
+
         double u_prime = 0;
         double u2_prime = 0;
-        for (int k = 0; k < n; k++) {
-            if (ck[k+1] == ck[k]) {
-                wgts[k] = (exp_eta[k] * u_prime - exp_eta[k] * exp_eta[k] * u2_prime) * wgts_user[k];
-                residuals[k] = wgts[k] * eta[k] + delta[k] / wgts_user[k] - exp_eta[k] * u_prime / wgts_user[k];
-            } else {
-                u_prime += d[ck[k+1] - 1] / sum_exp_eta[ck[k+1] - 1];
-                u2_prime += d[ck[k+1 - 1]] / (sum_exp_eta[ck[k+1] - 1] * sum_exp_eta[ck[k+1] - 1]);
-                wgts[k] = (exp_eta[k] * u_prime - exp_eta[k] * exp_eta[k] * u2_prime) * wgts_user[k];
-                residuals[k] = wgts[k] * eta[k] + delta[k] * wgts_user[k] - exp_eta[k] * u_prime * wgts_user[k];
+        for (int k = 0; k < n; ++k) {
+            if (ck[k + 1] != ck[k]) {
+                u_prime += d[ck[k + 1] - 1] / sum_exp_eta[ck[k + 1] - 1];
+                u2_prime += d[ck[k + 1] - 1] / (sum_exp_eta[ck[k + 1] - 1] * sum_exp_eta[ck[k + 1] - 1]);
             }
+            wgts[k] = wgts_user[k] * exp_eta[k] * (u_prime - exp_eta[k] * u2_prime);
+            residuals[k] = wgts_user[k] * (y(k, 1) - exp_eta[k] * u_prime);
         }
         wgts_sum = wgts.sum();
 
         // initial weighted sum squares x / xz cols and gradient
-        idx = 0;
+        int idx = 0;
         for (int k = 0; k < X.cols(); ++k, ++idx) {
             gradient[idx] = xs[idx] * (X.col(k).dot(residuals) - xm[idx] * residuals.sum());
             xv[idx] = std::pow(xs[idx], 2) * (X.col(k).cwiseProduct(X.col(k)) - 2 * xm[idx] * X.col(k) + std::pow(xm[idx], 2) * Eigen::VectorXd::Ones(n)).adjoint() * wgts;
@@ -218,9 +211,11 @@ public:
     }
 
     // warm start initialization given current estimates
-    virtual void warm_start(const Eigen::Ref<const Eigen::VectorXd> & betas_start) {
+    virtual void warm_start(const double & b0_start,
+                            const Eigen::Ref<const Eigen::VectorXd> & betas_start) {
 
         // initialize estimates with provided values
+        b0 = b0_start;
         betas = betas_start;
 
         // update residuals, working response, weighted sum squres X / XZ
@@ -258,23 +253,22 @@ public:
         VecXd exp_eta = eta.array().exp();
         double sum_exp_eta_prime = 0;
         VectorXd sum_exp_eta(m);
-        for (int i = m-1; i >= 0 && i < m; i--) {
-            sum_exp_eta[i] = sum_exp_eta_prime + exp_eta.segment((n-ri[i]), (ri[i]-ri[i+1])).sum();
+        for (int i = m - 1; i >= 0; --i) {
+            sum_exp_eta[i] = sum_exp_eta_prime + exp_eta.segment(n - ri[i], ri[i] - ri[i + 1]).sum();
             sum_exp_eta_prime = sum_exp_eta[i];
         }
+
         double u_prime = 0;
         double u2_prime = 0;
-        for (int k = 0; k < n; k++) {
-            if (ck[k+1] == ck[k]) {
-                wgts[k] = (exp_eta[k] * u_prime - exp_eta[k] * exp_eta[k] * u2_prime) * wgts_user[k];
-                residuals[k] = wgts[k] * eta[k] + delta[k] * wgts_user[k] - exp_eta[k] * u_prime * wgts_user[k] - eta[k] * wgts[k];
-            } else {
-                u_prime += d[ck[k+1] - 1] / sum_exp_eta[ck[k+1] - 1];
-                u2_prime += d[ck[k+1 - 1]] / (sum_exp_eta[ck[k+1] - 1] * sum_exp_eta[ck[k+1] - 1]);
-                wgts[k] = (exp_eta[k] * u_prime - exp_eta[k] * exp_eta[k] * u2_prime) * wgts_user[k];
-                residuals[k] = wgts[k] * eta[k] + delta[k] * wgts_user[k] - exp_eta[k] * u_prime * wgts_user[k] - eta[k] * wgts[k];
+        for (int k = 0; k < n; ++k) {
+            if (ck[k + 1] != ck[k]) {
+                u_prime += d[ck[k + 1] - 1] / sum_exp_eta[ck[k + 1] - 1];
+                u2_prime += d[ck[k + 1] - 1] / (sum_exp_eta[ck[k + 1] - 1] * sum_exp_eta[ck[k + 1] - 1]);
             }
+            wgts[k] = wgts_user[k] * exp_eta[k] * (u_prime - exp_eta[k] * u2_prime);
+            residuals[k] = wgts_user[k] * (y(k, 1) - exp_eta[k] * u_prime);
         }
+        wgts_sum = wgts.sum();
 
         // update weighted sum squares x / xz cols
         idx = 0;
@@ -304,43 +298,6 @@ public:
         betas_prior = betas;
         return converged_outer;
     }
-
-    // check kkt conditions
-    virtual bool check_kkt() {
-        int num_violations = 0;
-        int idx = 0;
-        double resid_sum = residuals.sum();
-        for (int k = 0; k < X.cols(); ++k, ++idx) {
-            if (!strong_set[idx]) {
-                gradient[idx] = xs[idx] * (X.col(k).dot(residuals) - xm[idx] * resid_sum);
-                if (std::abs(gradient[idx]) > penalty[0] * penalty_type[idx] * cmult[idx]) {
-                    strong_set[idx] = true;
-                    xv[idx] = std::pow(xs[idx], 2) * (X.col(k).cwiseProduct(X.col(k)) - 2 * xm[idx] * X.col(k) + std::pow(xm[idx], 2) * Eigen::VectorXd::Ones(n)).adjoint() * wgts;
-                    ++num_violations;
-                }
-            }
-        }
-        idx += Fixed.cols();
-        for (int k = 0; k < XZ.cols(); ++k, ++idx) {
-            if (!strong_set[idx]) {
-                gradient[idx] = xs[idx] * (XZ.col(k).dot(residuals) - xm[idx] * resid_sum);
-                if (std::abs(gradient[idx]) > penalty[1] * penalty_type[idx] * cmult[idx]) {
-                    strong_set[idx] = true;
-                    xv[idx] = std::pow(xs[idx], 2) * (XZ.col(k).cwiseProduct(XZ.col(k)) - 2 * xm[idx] * XZ.col(k) + std::pow(xm[idx], 2) * Eigen::VectorXd::Ones(n)).adjoint() * wgts;
-                    ++num_violations;
-                }
-            }
-        }
-        return num_violations == 0;
-    }
 };
-
-
-
-
-
-
-
-
 
 #endif // COX_SOLVER_H

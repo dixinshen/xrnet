@@ -9,13 +9,13 @@ tune_xrnet(
   y,
   external = NULL,
   unpen = NULL,
-  family = c("gaussian", "binomial"),
+  family = c("gaussian", "binomial", "cox"),
   penalty_main = define_penalty(),
   penalty_external = define_penalty(),
   weights = NULL,
   standardize = c(TRUE, TRUE),
   intercept = c(TRUE, FALSE),
-  loss = c("deviance", "mse", "mae", "auc"),
+  loss = c("deviance", "mse", "mae", "auc", "c-index"),
   nfolds = 5,
   foldid = NULL,
   parallel = FALSE,
@@ -48,6 +48,7 @@ tune_xrnet(
 \itemize{
     \item "gaussian"
     \item "binomial"
+    \item "cox"
 }}
 
 \item{penalty_main}{specifies regularization object for x. See \code{\link{define_penalty}} for more details.}
@@ -70,6 +71,7 @@ Default is c(TRUE, FALSE).}
    \item "mse" (Mean Squared Error)
    \item "mae" (Mean Absolute Error)
    \item "auc" (Area under the curve)
+   \item "c-index" (Concordance Index)
 }}
 
 \item{nfolds}{number of folds for cross-validation. Default is 5.}

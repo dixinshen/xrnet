@@ -9,7 +9,7 @@ xrnet(
   y,
   external = NULL,
   unpen = NULL,
-  family = c("gaussian", "binomial"),
+  family = c("gaussian", "binomial", "cox"),
   penalty_main = define_penalty(),
   penalty_external = define_penalty(),
   weights = NULL,
@@ -44,6 +44,7 @@ xrnet(
 \itemize{
     \item "gaussian"
     \item "binomial"
+    \item "cox"
 }}
 
 \item{penalty_main}{specifies regularization object for x. See \code{\link{define_penalty}} for more details.}

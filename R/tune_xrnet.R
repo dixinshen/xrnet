@@ -28,6 +28,7 @@
 #' \itemize{
 #'     \item "gaussian"
 #'     \item "binomial"
+#'     \item "cox"
 #' }
 #' @param penalty_main specifies regularization object for x. See \code{\link{define_penalty}} for more details.
 #' @param penalty_external specifies regularization object for external. See \code{\link{define_penalty}} for more details.
@@ -44,6 +45,7 @@
 #'    \item "mse" (Mean Squared Error)
 #'    \item "mae" (Mean Absolute Error)
 #'    \item "auc" (Area under the curve)
+#'    \item "c-index" (Concordance Index)
 #' }
 #' @param nfolds number of folds for cross-validation. Default is 5.
 #' @param foldid (optional) vector that identifies user-specified fold for each observation.
@@ -94,13 +96,13 @@ tune_xrnet <- function(x,
                        y,
                        external = NULL,
                        unpen = NULL,
-                       family = c("gaussian", "binomial"),
+                       family = c("gaussian", "binomial", "cox"),
                        penalty_main = define_penalty(),
                        penalty_external = define_penalty(),
                        weights = NULL,
                        standardize = c(TRUE, TRUE),
                        intercept = c(TRUE, FALSE),
-                       loss = c("deviance", "mse", "mae", "auc"),
+                       loss = c("deviance", "mse", "mae", "auc", "c-index"),
                        nfolds = 5,
                        foldid = NULL,
                        parallel = FALSE,
@@ -118,6 +120,8 @@ tune_xrnet <- function(x,
             loss <- "mse"
         } else if (family == "binomial") {
             loss <- "auc"
+        } else if (family == "cox") {
+            loss <- "c-index"
         }
     } else {
         loss <- match.arg(loss)
@@ -125,6 +129,8 @@ tune_xrnet <- function(x,
         if (family == "gaussian" && !(loss %in% c("deviance", "mse", "mae"))) {
             loss_available <- FALSE
         } else if (family == "binomial" && !(loss %in% c("deviance", "auc"))) {
+            loss_available <- FALSE
+        } else if (family == "cox" && !(loss %in% c("c-index"))) {
             loss_available <- FALSE
         }
         if (!loss_available) {
@@ -155,8 +161,24 @@ tune_xrnet <- function(x,
     # check external type
     is_sparse_ext <- is(external, "sparseMatrix")
 
-    # check y type
-    y <- drop(as.numeric(y))
+    # check type of y
+    if (family == "cox") {
+        if ("Surv" %in% class(x)) {
+            y <- cbind(y[, 1], y[, 2])
+        }
+        if (any(y[, 1] < 0)) {
+            stop("time column for survival outcome, y, contains negative-values")
+        }
+        if (is.unsorted(y[, 1])) {
+            stop("x and y must be sorted by time column for survival outcome")
+        }
+        if (any(!(y[, 2] %in% c(0, 1)))) {
+            stop("status column for survival outcome, y, must be coded 0/1")
+        }
+        intercept[1] <- FALSE
+    } else {
+        y <- as.double(drop(y))
+    }
 
     # Get arguments to tune_xrnet() function and filter for calls to fitting procedure
     xrnet_call <- match.call(expand.dots = TRUE)
@@ -168,7 +190,7 @@ tune_xrnet <- function(x,
     xrnet_call[[1]] <- as.name("xrnet")
 
     # Set sample size / weights
-    n <- length(y)
+    n <- NROW(y)
     if (is.null(weights)) {
         weights <- rep(1, n)
     }

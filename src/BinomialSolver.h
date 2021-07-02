@@ -264,35 +264,6 @@ public:
         b0_prior = b0;
         return converged_outer;
     }
-
-    // check kkt conditions
-    virtual bool check_kkt() {
-        int num_violations = 0;
-        int idx = 0;
-        double resid_sum = residuals.sum();
-        for (int k = 0; k < X.cols(); ++k, ++idx) {
-            if (!strong_set[idx]) {
-                gradient[idx] = xs[idx] * (X.col(k).dot(residuals) - xm[idx] * resid_sum);
-                if (std::abs(gradient[idx]) > penalty[0] * penalty_type[idx] * cmult[idx]) {
-                    strong_set[idx] = true;
-                    xv[idx] = std::pow(xs[idx], 2) * (X.col(k).cwiseProduct(X.col(k)) - 2 * xm[idx] * X.col(k) + std::pow(xm[idx], 2) * Eigen::VectorXd::Ones(n)).adjoint() * wgts;
-                    ++num_violations;
-                }
-            }
-        }
-        idx += Fixed.cols();
-        for (int k = 0; k < XZ.cols(); ++k, ++idx) {
-            if (!strong_set[idx]) {
-                gradient[idx] = xs[idx] * (XZ.col(k).dot(residuals) - xm[idx] * resid_sum);
-                if (std::abs(gradient[idx]) > penalty[1] * penalty_type[idx] * cmult[idx]) {
-                    strong_set[idx] = true;
-                    xv[idx] = std::pow(xs[idx], 2) * (XZ.col(k).cwiseProduct(XZ.col(k)) - 2 * xm[idx] * XZ.col(k) + std::pow(xm[idx], 2) * Eigen::VectorXd::Ones(n)).adjoint() * wgts;
-                    ++num_violations;
-                }
-            }
-        }
-        return num_violations == 0;
-    }
 };
 
 #endif // BINOMIAL_SOLVER_H
